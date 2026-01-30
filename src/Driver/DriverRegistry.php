@@ -1,0 +1,51 @@
+<?php
+
+declare(strict_types=1);
+
+namespace PhpSoftBox\Encryptor\Driver;
+
+use InvalidArgumentException;
+use PhpSoftBox\Encryptor\Contracts\DriverInterface;
+
+use function sprintf;
+use function strtolower;
+
+final class DriverRegistry
+{
+    /**
+     * @var array<string, DriverInterface>
+     */
+    private array $driversByName = [];
+
+    /**
+     * @param list<DriverInterface> $drivers
+     */
+    public function __construct(array $drivers = [])
+    {
+        foreach ($drivers as $driver) {
+            $this->register($driver);
+        }
+    }
+
+    public function register(DriverInterface $driver): void
+    {
+        $name                       = strtolower($driver->name());
+        $this->driversByName[$name] = $driver;
+    }
+
+    public function has(string $driverName): bool
+    {
+        return isset($this->driversByName[strtolower($driverName)]);
+    }
+
+    public function get(string $driverName): DriverInterface
+    {
+        $name   = strtolower($driverName);
+        $driver = $this->driversByName[$name] ?? null;
+        if ($driver === null) {
+            throw new InvalidArgumentException(sprintf('Unsupported encryptor driver "%s".', $driverName));
+        }
+
+        return $driver;
+    }
+}
