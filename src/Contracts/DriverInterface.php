@@ -8,7 +8,13 @@ interface DriverInterface
 {
     public function name(): string;
 
-    public function encrypt(string $plaintext, string $key): string;
+    /**
+     * @param string $associatedData данные, к которым привязывается шифртекст (например, имя cookie); сами не шифруются
+     */
+    public function encrypt(string $plaintext, string $key, string $associatedData = ''): string;
 
-    public function decrypt(string $ciphertext, string $key): string;
+    /**
+     * @param string $associatedData те же данные, что при шифровании; иначе — исключение
+     */
+    public function decrypt(string $ciphertext, string $key, string $associatedData = ''): string;
 }

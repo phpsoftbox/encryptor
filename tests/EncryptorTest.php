@@ -19,6 +19,9 @@ use function function_exists;
 #[CoversClass(OpenSslDriver::class)]
 final class EncryptorTest extends TestCase
 {
+    private const string KEY          = 'current-key-0123456789abcdef0123456789';
+    private const string PREVIOUS_KEY = 'previous-key-0123456789abcdef012345678';
+
     #[Test]
     public function encryptsAndDecryptsWithDefaultDriver(): void
     {
@@ -28,12 +31,12 @@ final class EncryptorTest extends TestCase
 
         $encryptor = new Encryptor(
             registry: new DriverRegistry([new OpenSslDriver()]),
-            defaultKey: 'secret-key',
+            defaultKey: self::KEY,
         );
 
-        $ciphertext = $encryptor->encrypt('payload', 'secret-key');
+        $ciphertext = $encryptor->encrypt('payload', self::KEY);
 
-        self::assertSame('payload', $encryptor->decrypt($ciphertext, 'secret-key'));
+        self::assertSame('payload', $encryptor->decrypt($ciphertext, self::KEY));
     }
 
     #[Test]
@@ -45,10 +48,10 @@ final class EncryptorTest extends TestCase
 
         $encryptor = new Encryptor(
             registry: new DriverRegistry([new OpenSslDriver()]),
-            defaultKey: 'secret-key',
+            defaultKey: self::KEY,
         );
 
-        $ciphertext = $encryptor->encrypt('payload', 'secret-key');
+        $ciphertext = $encryptor->encrypt('payload', self::KEY);
 
         $value = new EncryptedValue($ciphertext);
 
@@ -62,14 +65,14 @@ final class EncryptorTest extends TestCase
             $this->markTestSkipped('OpenSSL extension is required for this test.');
         }
 
-        $keyProvider = new ArrayKeyProvider('key-current', ['key-previous']);
+        $keyProvider = new ArrayKeyProvider(self::KEY, [self::PREVIOUS_KEY]);
 
         $encryptor = new Encryptor(
             registry: new DriverRegistry([new OpenSslDriver()]),
             keyProvider: $keyProvider,
         );
 
-        $ciphertext = $encryptor->encrypt('payload', 'key-previous');
+        $ciphertext = $encryptor->encrypt('payload', self::PREVIOUS_KEY);
 
         $value = new EncryptedValue($ciphertext);
 
@@ -85,7 +88,7 @@ final class EncryptorTest extends TestCase
 
         $encryptor = new Encryptor(
             registry: new DriverRegistry([new OpenSslDriver()]),
-            keyProvider: new ArrayKeyProvider('key-current', ['key-previous']),
+            keyProvider: new ArrayKeyProvider(self::KEY, [self::PREVIOUS_KEY]),
         );
 
         $ciphertext = $encryptor->encryptWithCurrentKey('payload');

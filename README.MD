@@ -25,18 +25,21 @@ declare(strict_types=1);
 
 use PhpSoftBox\Encryptor\Encryptor;
 
-$encryptor = new Encryptor(defaultKey: 'secret-key');
+$encryptor = new Encryptor(defaultKey: $_ENV['APP_KEY']);
 
-$ciphertext = $encryptor->encrypt('payload', 'secret-key');
-$plain = $encryptor->decrypt($ciphertext, 'secret-key');
+$ciphertext = $encryptor->encrypt('payload', $_ENV['APP_KEY']);
+$plain = $encryptor->decrypt($ciphertext, $_ENV['APP_KEY']);
 ```
 
 ## Ключи
 
-- Ключ обязателен и должен быть непустой строкой.
+- Ключ для шифрования — не короче 32 байт (`Encryptor::MIN_KEY_LENGTH`). Генерируйте его командой
+  `encryptor:key:generate` (32 случайных байта в base64); строки вида `secret-key` отклоняются
+  `InvalidArgumentException`.
+- Для расшифровки подходит любой непустой ключ: данные, зашифрованные прежним коротким ключом, читаются, пока он
+  указан в `previousKeys`. Новые данные шифруются только текущим длинным ключом.
 - Можно передавать ключ явно в `encrypt()`/`decrypt()`, или использовать `KeyProviderInterface`.
-- При отсутствии ключа будет выброшен `InvalidArgumentException`.
- - Если `KeyProviderInterface` не задан, можно передать `defaultKey` в `Encryptor`.
+- Если `KeyProviderInterface` не задан, можно передать `defaultKey` в `Encryptor`.
 
 Использование ключа из провайдера:
 
@@ -47,7 +50,7 @@ use PhpSoftBox\Encryptor\Encryptor;
 use PhpSoftBox\Encryptor\Key\ArrayKeyProvider;
 
 $encryptor = new Encryptor(
-    keyProvider: new ArrayKeyProvider('secret-key'),
+    keyProvider: new ArrayKeyProvider($_ENV['APP_KEY']),
 );
 
 $ciphertext = $encryptor->encryptWithCurrentKey('payload');
@@ -61,7 +64,26 @@ $plain = $encryptor->decryptWithAnyKey($ciphertext);
 Формат шифртекста `OpenSslDriver`:
 
 ```
-base64(iv).base64(tag).base64(data)
+v1.base64(iv).base64(tag).base64(data)
+```
+
+- ключ AES выводится из переданного ключа через HKDF-SHA256;
+- тег — ровно 16 байт, IV — 12 байт; шифртекст с другой длиной отклоняется (короткий тег GCM подбирается перебором);
+- версия формата и связанные данные входят в аутентификацию.
+
+Шифртекст без префикса `v1.` (`base64(iv).base64(tag).base64(data)`, ключ — SHA-256 от переданного) создавался до
+версии 1.0. Он по-прежнему расшифровывается, но только без связанных данных; новые значения в нём не шифруются.
+
+## Связанные данные
+
+Последний необязательный аргумент `encrypt()`, `decrypt()`, `encryptWithCurrentKey()` и `decryptWithAnyKey()` — данные,
+к которым привязывается шифртекст. Они не шифруются, но без них значение не расшифровать. Так `CookieMiddleware`
+привязывает значение к имени cookie: зашифрованное значение одной cookie нельзя подставить в другую.
+
+```php
+$ciphertext = $encryptor->encryptWithCurrentKey($sessionId, 'cookie:psb_session');
+$encryptor->decryptWithAnyKey($ciphertext, 'cookie:psb_session'); // $sessionId
+$encryptor->decryptWithAnyKey($ciphertext, 'cookie:remember_web'); // исключение
 ```
 
 ### Использование другого драйвера
@@ -73,8 +95,8 @@ use PhpSoftBox\Encryptor\Encryptor;
 
 $encryptor = new Encryptor();
 
-$ciphertext = $encryptor->encryptWithDriver('openssl', 'payload', 'secret-key');
-$plain = $encryptor->decryptWithDriver('openssl', $ciphertext, 'secret-key');
+$ciphertext = $encryptor->encryptWithDriver('openssl', 'payload', $_ENV['APP_KEY']);
+$plain = $encryptor->decryptWithDriver('openssl', $ciphertext, $_ENV['APP_KEY']);
 ```
 
 ### Регистрация кастомного драйвера
@@ -92,12 +114,12 @@ final class MyDriver implements DriverInterface
         return 'my-driver';
     }
 
-    public function encrypt(string $plaintext, string $key): string
+    public function encrypt(string $plaintext, string $key, string $associatedData = ''): string
     {
         // ...
     }
 
-    public function decrypt(string $ciphertext, string $key): string
+    public function decrypt(string $ciphertext, string $key, string $associatedData = ''): string
     {
         // ...
     }
@@ -106,8 +128,8 @@ final class MyDriver implements DriverInterface
 $encryptor = new Encryptor();
 $encryptor->registerDriver(new MyDriver());
 
-$ciphertext = $encryptor->encryptWithDriver('my-driver', 'payload', 'secret-key');
-$plain = $encryptor->decryptWithDriver('my-driver', $ciphertext, 'secret-key');
+$ciphertext = $encryptor->encryptWithDriver('my-driver', 'payload', $_ENV['APP_KEY']);
+$plain = $encryptor->decryptWithDriver('my-driver', $ciphertext, $_ENV['APP_KEY']);
 ```
 
 ## EncryptedValue
@@ -120,8 +142,8 @@ $plain = $encryptor->decryptWithDriver('my-driver', $ciphertext, 'secret-key');
 use PhpSoftBox\Encryptor\EncryptedValue;
 use PhpSoftBox\Encryptor\Encryptor;
 
-$encryptor = new Encryptor(defaultKey: 'secret-key');
-$ciphertext = $encryptor->encrypt('payload', 'secret-key');
+$encryptor = new Encryptor(defaultKey: $_ENV['APP_KEY']);
+$ciphertext = $encryptor->encrypt('payload', $_ENV['APP_KEY']);
 
 $value = new EncryptedValue($ciphertext);
 $plain = $encryptor->resolve($value); // payload
@@ -135,10 +157,10 @@ $plain = $encryptor->resolve($value); // payload
 use PhpSoftBox\Encryptor\EncryptedValue;
 use PhpSoftBox\Encryptor\Encryptor;
 
-$encryptor = new Encryptor(defaultKey: 'key-v1');
-$ciphertext = $encryptor->encrypt('payload', 'key-v2');
+$encryptor = new Encryptor(defaultKey: $keyV1);
+$ciphertext = $encryptor->encrypt('payload', $keyV2);
 
-$value = new EncryptedValue($ciphertext, key: 'key-v2', driver: 'openssl');
+$value = new EncryptedValue($ciphertext, key: $keyV2, driver: 'openssl');
 $plain = $encryptor->resolve($value);
 ```
 
@@ -158,14 +180,14 @@ use PhpSoftBox\Encryptor\Encryptor;
 use PhpSoftBox\Encryptor\Key\ArrayKeyProvider;
 
 $provider = new ArrayKeyProvider(
-    currentKey: 'key-v2',
-    previousKeys: ['key-v1', 'key-v0'],
+    currentKey: $_ENV['APP_KEY'],
+    previousKeys: [$_ENV['APP_PREVIOUS_KEY']],
 );
 
 $encryptor = new Encryptor(keyProvider: $provider);
 
-$ciphertext = $encryptor->encryptWithCurrentKey('payload'); // шифруется key-v2
-$plain = $encryptor->decryptWithAnyKey($ciphertext);        // пробует key-v2, затем key-v1, key-v0
+$ciphertext = $encryptor->encryptWithCurrentKey('payload'); // шифруется текущим ключом
+$plain = $encryptor->decryptWithAnyKey($ciphertext);        // пробует текущий, затем предыдущие
 ```
 
 ### DI и конфигурация
@@ -218,8 +240,8 @@ use PhpSoftBox\Config\Config;
 use PhpSoftBox\Encryptor\EncryptedValue;
 use PhpSoftBox\Encryptor\Encryptor;
 
-$encryptor = new Encryptor(defaultKey: 'secret-key');
-$hash = $encryptor->encrypt('payload', 'secret-key');
+$encryptor = new Encryptor(defaultKey: $_ENV['APP_KEY']);
+$hash = $encryptor->encrypt('payload', $_ENV['APP_KEY']);
 
 $config = new Config(
     [
@@ -241,7 +263,7 @@ use PhpSoftBox\Encryptor\Encryptor;
 
 $factory = new ConfigFactory(
     baseDir: __DIR__ . '/..',
-    encryptedValueResolver: new Encryptor(defaultKey: 'secret-key')
+    encryptedValueResolver: new Encryptor(defaultKey: $_ENV['APP_KEY'])
 );
 
 $config = $factory->create();
