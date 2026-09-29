@@ -13,8 +13,20 @@ use PhpSoftBox\Encryptor\Driver\DriverRegistry;
 use PhpSoftBox\Encryptor\Driver\OpenSslDriver;
 use Throwable;
 
+use function sprintf;
+use function strlen;
+
+/**
+ * Шифрование с драйверами и ротацией ключей.
+ *
+ * Ключ для шифрования — не короче {@see self::MIN_KEY_LENGTH} байт (например, из `encryptor:key:generate`). Для
+ * расшифровки подходит любой непустой ключ: так читаются данные, зашифрованные прежним коротким ключом из
+ * `previousKeys`.
+ */
 final class Encryptor implements EncryptorInterface, EncryptedValueResolverInterface
 {
+    public const int MIN_KEY_LENGTH = 32;
+
     private DriverRegistry $registry;
     private string $defaultDriver;
     private ?string $defaultKey;
@@ -37,40 +49,38 @@ final class Encryptor implements EncryptorInterface, EncryptedValueResolverInter
         $this->registry->register($driver);
     }
 
-    public function encrypt(string $plaintext, string $key): string
+    public function encrypt(string $plaintext, string $key, string $associatedData = ''): string
     {
-        return $this->encryptWithDriver($this->defaultDriver, $plaintext, $key);
+        return $this->encryptWithDriver($this->defaultDriver, $plaintext, $key, $associatedData);
     }
 
-    public function decrypt(string $ciphertext, string $key): string
+    public function decrypt(string $ciphertext, string $key, string $associatedData = ''): string
     {
-        return $this->decryptWithDriver($this->defaultDriver, $ciphertext, $key);
+        return $this->decryptWithDriver($this->defaultDriver, $ciphertext, $key, $associatedData);
     }
 
-    public function encryptWithCurrentKey(string $plaintext): string
+    public function encryptWithCurrentKey(string $plaintext, string $associatedData = ''): string
     {
-        return $this->encryptWithDriver($this->defaultDriver, $plaintext, $this->currentKey());
+        return $this->encryptWithDriver($this->defaultDriver, $plaintext, $this->currentKey(), $associatedData);
     }
 
-    public function decryptWithAnyKey(string $ciphertext, ?string $driverName = null): string
+    public function decryptWithAnyKey(string $ciphertext, string $associatedData = '', ?string $driverName = null): string
     {
-        $driver = $driverName ?? $this->defaultDriver;
-
-        return $this->decryptWithKeys($driver, $ciphertext, $this->keyCandidates());
+        return $this->decryptWithKeys($driverName ?? $this->defaultDriver, $ciphertext, $this->keyCandidates(), $associatedData);
     }
 
-    public function encryptWithDriver(string $driverName, string $plaintext, string $key): string
+    public function encryptWithDriver(string $driverName, string $plaintext, string $key, string $associatedData = ''): string
+    {
+        $key = $this->requireEncryptionKey($key);
+
+        return $this->registry->get($driverName)->encrypt($plaintext, $key, $associatedData);
+    }
+
+    public function decryptWithDriver(string $driverName, string $ciphertext, string $key, string $associatedData = ''): string
     {
         $key = $this->requireKey($key);
 
-        return $this->registry->get($driverName)->encrypt($plaintext, $key);
-    }
-
-    public function decryptWithDriver(string $driverName, string $ciphertext, string $key): string
-    {
-        $key = $this->requireKey($key);
-
-        return $this->registry->get($driverName)->decrypt($ciphertext, $key);
+        return $this->registry->get($driverName)->decrypt($ciphertext, $key, $associatedData);
     }
 
     public function resolve(EncryptedValue $value): string
@@ -121,7 +131,7 @@ final class Encryptor implements EncryptorInterface, EncryptedValueResolverInter
     /**
      * @param list<string> $keys
      */
-    private function decryptWithKeys(string $driverName, string $ciphertext, array $keys): string
+    private function decryptWithKeys(string $driverName, string $ciphertext, array $keys, string $associatedData = ''): string
     {
         if ($keys === []) {
             throw new InvalidArgumentException('Encryption key must be a non-empty string.');
@@ -134,7 +144,7 @@ final class Encryptor implements EncryptorInterface, EncryptedValueResolverInter
             $key = $this->requireKey($key);
 
             try {
-                return $driver->decrypt($ciphertext, $key);
+                return $driver->decrypt($ciphertext, $key, $associatedData);
             } catch (Throwable $exception) {
                 $lastException = $exception;
             }
@@ -145,6 +155,20 @@ final class Encryptor implements EncryptorInterface, EncryptedValueResolverInter
         }
 
         throw new InvalidArgumentException('Encryption key must be a non-empty string.');
+    }
+
+    private function requireEncryptionKey(string $key): string
+    {
+        $key = $this->requireKey($key);
+
+        if (strlen($key) < self::MIN_KEY_LENGTH) {
+            throw new InvalidArgumentException(sprintf(
+                'Encryption key must be at least %d bytes long; generate one with `encryptor:key:generate`.',
+                self::MIN_KEY_LENGTH,
+            ));
+        }
+
+        return $key;
     }
 
     private function requireKey(?string $key): string

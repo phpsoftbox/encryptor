@@ -7,12 +7,14 @@ namespace PhpSoftBox\Encryptor\Cli;
 use PhpSoftBox\CliApp\Command\HandlerInterface;
 use PhpSoftBox\CliApp\Response;
 use PhpSoftBox\CliApp\Runner\RunnerInterface;
+use PhpSoftBox\Encryptor\Encryptor;
 
 use function base64_encode;
 use function bin2hex;
 use function is_int;
 use function is_string;
 use function random_bytes;
+use function sprintf;
 use function strtolower;
 
 final class GenerateKeyHandler implements HandlerInterface
@@ -20,8 +22,8 @@ final class GenerateKeyHandler implements HandlerInterface
     public function run(RunnerInterface $runner): int|Response
     {
         $length = $runner->request()->option('length');
-        if (!is_int($length) || $length <= 0) {
-            $runner->io()->writeln('Некорректная длина ключа.', 'error');
+        if (!is_int($length) || $length < Encryptor::MIN_KEY_LENGTH) {
+            $runner->io()->writeln(sprintf('Длина ключа — не меньше %d байт.', Encryptor::MIN_KEY_LENGTH), 'error');
 
             return Response::FAILURE;
         }
